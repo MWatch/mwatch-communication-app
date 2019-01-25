@@ -1,5 +1,5 @@
 [package]
-name = "mwatch-protocol-spoof"
+name = "mwatch-send"
 version = "0.1.0"
 authors = ["Scott Mabin <MabezDev@gmail.com>"]
 edition = "2018"
@@ -9,3 +9,12 @@ structopt = "0.2.14"
 blurz = "0.4.0"
 env_logger = "0.6.0"
 simple-hex = "0.1.0"
+
+[dependencies.crc]
+version = "1.8.1"
+
+[[bin]]
+name = "mws"
+path = "src/main.rs"
+test = false
+bench = false

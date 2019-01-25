@@ -24,6 +24,8 @@ use structopt::StructOpt;
 
 use simple_hex::bytes_to_hex;
 
+use crc::crc32::checksum_ieee;
+
 /// MWatch Protocol Spoofer
 #[derive(StructOpt, Debug)]
 #[structopt(name = "MWatch Protocol Spoofer")]
@@ -41,7 +43,7 @@ struct Opt {
     message: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Handle<'a> {
     session: &'a Session,
     device: Device<'a>,
@@ -51,18 +53,21 @@ pub struct Handle<'a> {
 
 fn main() -> Result<(), Box<Error>> {
     let opt = Opt::from_args();
-    println!("{:?}", opt);
-
+    if opt.debug {
+        println!("{:?}", opt);
+    }
     let bt_session = &Session::create_session(None)?;
-    match find_device("MWatch", &bt_session) {
+    match find_device(&opt, "MWatch", &bt_session) {
         Ok(mut handle) => {
             if opt.binary.to_str().unwrap() == "" {
                 spoof_msg(&opt, &mut handle).unwrap();
             } else {
                 send_binary(&opt, &mut handle).unwrap();
             }
+            println!("finished transmission.");
             // always disconnect at the end
-            handle.device.disconnect()?
+            handle.device.disconnect()?;
+            println!("Disconnected.");
         },
         Err(e) => println!("{:?}", e),
     }
@@ -76,14 +81,43 @@ fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
     send(handle, data)
 }
 
+/// Basic structure STX -> Type e.g A for Application -> (DELIM -> DATA)* -> ETX
+/// * inidicates an number of delimiters followed by data
 fn send_binary(opt: &Opt, handle: &mut Handle) -> Result<(), Box<Error>> {
+    let mut prepend = vec![2, b'A', 31]; // A for application
     let mut buffer = Vec::new();
-    // read the whole file
     let mut file = File::open(&opt.binary)?;
     file.read_to_end(&mut buffer)?;
-    let mut hexed = vec![0u8; buffer.len() * 2];
-    bytes_to_hex(&buffer, &mut hexed).unwrap();
+
+    let digest = checksum_ieee(&buffer);
+    let bytes: [u8; 4] = transform_u32_to_array_of_u8(digest);
+    let mut digest_hex_bytes = vec![0u8; bytes.len() * 2];
+    bytes_to_hex(&bytes, &mut digest_hex_bytes).unwrap();
+    prepend.append(&mut digest_hex_bytes);
+    prepend.push(31); //DELIM
+
+    let total = (buffer.len() * 2) + prepend.len();
+    let mut hexed = vec![0u8; total];
+
+    for i in 0..prepend.len() {
+        hexed[i] = prepend[i]
+    }
+    
+    bytes_to_hex(&buffer, &mut hexed[prepend.len()..]).unwrap();
+    hexed.push(3u8); // ETX
+    if opt.debug {
+        println!("Digest of binary: 0x{:08X}, as u32 {}", digest, digest);
+        println!("HEXED[{}]: {:?}", hexed.len(), hexed);
+    }
     send(handle, hexed)
+}
+
+fn transform_u32_to_array_of_u8(x:u32) -> [u8;4] {
+    let b1 : u8 = ((x >> 24) & 0xff) as u8;
+    let b2 : u8 = ((x >> 16) & 0xff) as u8;
+    let b3 : u8 = ((x >> 8) & 0xff) as u8;
+    let b4 : u8 = (x & 0xff) as u8;
+    return [b1, b2, b3, b4]
 }
 
 fn send(handle: &mut Handle, data: Vec<u8>) -> Result<(), Box<Error>> {
@@ -93,7 +127,7 @@ fn send(handle: &mut Handle, data: Vec<u8>) -> Result<(), Box<Error>> {
     Ok(())
 }
 
-fn find_device<'a>(name: &'a str, bt_session: &'a Session) -> Result<Handle<'a>, Box<Error>> {
+fn find_device<'a>(opt: &Opt, name: &'a str, bt_session: &'a Session) -> Result<Handle<'a>, Box<Error>> {
     let adapter: Adapter = Adapter::init(bt_session)?;
     let session = DiscoverySession::create_session(
         &bt_session,
@@ -113,16 +147,20 @@ fn find_device<'a>(name: &'a str, bt_session: &'a Session) -> Result<Handle<'a>,
     if devices.is_empty() {
         return Err(Box::from("No device found"));
     }
-    println!("{} device(s) found", devices.len());
+    if opt.debug {
+        println!("{} device(s) found", devices.len());
+    }
     let mut device: Device = Device::new(bt_session, "".to_string());
     'device_loop: for d in devices {
         device = Device::new(bt_session, d.clone());
-        println!("{} {:?}", device.get_id(), device.get_alias());
+        if opt.debug {
+            println!("{} {:?}", device.get_id(), device.get_alias());
+        }
         let uuids = device.get_uuids()?;
         // println!("{:?}", uuids);
         'uuid_loop: for uuid in uuids {
             if uuid == SERVICE && name == device.get_alias().unwrap().as_str() {
-                println!("{:?} has a service!", device.get_alias().unwrap());
+                println!("Device {:?} has the correct service!", device.get_alias().unwrap());
                 println!("connect device...");
                 device.connect(10000).ok();
                 if device.is_connected().unwrap() {
