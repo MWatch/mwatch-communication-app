@@ -3,6 +3,14 @@ name = "mwatch-send"
 version = "0.1.0"
 authors = ["Scott Mabin <MabezDev@gmail.com>"]
 edition = "2018"
+description = "A tool to upload binaries and send notifications to the mwatch over bluetooth"
+license = "MIT OR Apache-2.0"
+keywords = ["no-std", "embedded", "mwatch"]
+readme = "README.md"
+exclude = [
+	".travis.yml",
+	".gitignore",
+]
 
 [dependencies]
 structopt = "0.2.14"
