@@ -1,7 +1,5 @@
 
 
-// use env_logger::init;
-
 pub const SERVICE: &'static str = "0000ffe0-0000-1000-8000-00805f9b34fb";
 pub const CHARACTERISTIC: &'static str = "0000ffe1-0000-1000-8000-00805f9b34fb";
 
@@ -20,7 +18,11 @@ use blurz::bluetooth_gatt_service::BluetoothGATTService as Service;
 use blurz::bluetooth_session::BluetoothSession as Session;
 
 use std::path::PathBuf;
+use std::io::prelude::*;
+use std::fs::File;
 use structopt::StructOpt;
+
+use simple_hex::bytes_to_hex;
 
 /// MWatch Protocol Spoofer
 #[derive(StructOpt, Debug)]
@@ -32,7 +34,7 @@ struct Opt {
 
     /// binary to flash to the watch
     #[structopt(short = "b", long = "binary", parse(from_os_str), default_value = "")]
-    output: PathBuf,
+    binary: PathBuf,
 
     /// Message to send, defaults to 'Hello MWatch'
     #[structopt(short = "m", long = "message", default_value = "Hello MWatch")]
@@ -54,7 +56,7 @@ fn main() -> Result<(), Box<Error>> {
     let bt_session = &Session::create_session(None)?;
     match find_device("MWatch", &bt_session) {
         Ok(mut handle) => {
-            if opt.output.to_str().unwrap() == "" {
+            if opt.binary.to_str().unwrap() == "" {
                 spoof_msg(&opt, &mut handle).unwrap();
             } else {
                 send_binary(&opt, &mut handle).unwrap();
@@ -71,14 +73,24 @@ fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
     let mut data = vec![2, b'N', 31]; // N for notification
     data.append(&mut opt.message.clone().into_bytes());
     data.push(3u8); // ETX
-    for chunk in data.chunks(10) {
-        handle.characteristic.write_value(chunk.to_vec(), None).unwrap();
-    }
-    Ok(())
+    send(handle, data)
 }
 
-fn send_binary(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
-    unimplemented!()
+fn send_binary(opt: &Opt, handle: &mut Handle) -> Result<(), Box<Error>> {
+    let mut buffer = Vec::new();
+    // read the whole file
+    let mut file = File::open(&opt.binary)?;
+    file.read_to_end(&mut buffer)?;
+    let mut hexed = vec![0u8; buffer.len() * 2];
+    bytes_to_hex(&buffer, &mut hexed).unwrap();
+    send(handle, hexed)
+}
+
+fn send(handle: &mut Handle, data: Vec<u8>) -> Result<(), Box<Error>> {
+    for chunk in data.chunks(10) {
+        handle.characteristic.write_value(chunk.to_vec(), None)?;
+    }
+    Ok(())
 }
 
 fn find_device<'a>(name: &'a str, bt_session: &'a Session) -> Result<Handle<'a>, Box<Error>> {
