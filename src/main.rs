@@ -15,12 +15,73 @@ use blurz::bluetooth_adapter::BluetoothAdapter as Adapter;
 use blurz::bluetooth_device::BluetoothDevice as Device;
 use blurz::bluetooth_discovery_session::BluetoothDiscoverySession as DiscoverySession;
 use blurz::bluetooth_gatt_characteristic::BluetoothGATTCharacteristic as Characteristic;
-use blurz::bluetooth_gatt_descriptor::BluetoothGATTDescriptor as Descriptor;
+// use blurz::bluetooth_gatt_descriptor::BluetoothGATTDescriptor as Descriptor;
 use blurz::bluetooth_gatt_service::BluetoothGATTService as Service;
 use blurz::bluetooth_session::BluetoothSession as Session;
 
-fn find_device(name: &str) -> Result<(), Box<Error>> {
+use std::path::PathBuf;
+use structopt::StructOpt;
+
+/// MWatch Protocol Spoofer
+#[derive(StructOpt, Debug)]
+#[structopt(name = "MWatch Protocol Spoofer")]
+struct Opt {
+    /// Activate debug mode
+    #[structopt(short = "d", long = "debug")]
+    debug: bool,
+
+    /// binary to flash to the watch
+    #[structopt(short = "b", long = "binary", parse(from_os_str), default_value = "")]
+    output: PathBuf,
+
+    /// Message to send, defaults to 'Hello MWatch'
+    #[structopt(short = "m", long = "message", default_value = "Hello MWatch")]
+    message: String,
+}
+
+#[derive(Clone)]
+pub struct Handle<'a> {
+    session: &'a Session,
+    device: Device<'a>,
+    // service: Service<'a>,
+    characteristic: Characteristic<'a>,
+}
+
+fn main() -> Result<(), Box<Error>> {
+    let opt = Opt::from_args();
+    println!("{:?}", opt);
+
     let bt_session = &Session::create_session(None)?;
+    match find_device("MWatch", &bt_session) {
+        Ok(mut handle) => {
+            if opt.output.to_str().unwrap() == "" {
+                spoof_msg(&opt, &mut handle).unwrap();
+            } else {
+                send_binary(&opt, &mut handle).unwrap();
+            }
+            // always disconnect at the end
+            handle.device.disconnect()?
+        },
+        Err(e) => println!("{:?}", e),
+    }
+    Ok(())
+}
+
+fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
+    let mut data = vec![2, b'N', 31]; // N for notification
+    data.append(&mut opt.message.clone().into_bytes());
+    data.push(3u8); // ETX
+    for chunk in data.chunks(10) {
+        handle.characteristic.write_value(chunk.to_vec(), None).unwrap();
+    }
+    Ok(())
+}
+
+fn send_binary(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
+    unimplemented!()
+}
+
+fn find_device<'a>(name: &'a str, bt_session: &'a Session) -> Result<Handle<'a>, Box<Error>> {
     let adapter: Adapter = Adapter::init(bt_session)?;
     let session = DiscoverySession::create_session(
         &bt_session,
@@ -56,7 +117,7 @@ fn find_device(name: &str) -> Result<(), Box<Error>> {
                     println!("checking gatt...");
                     // We need to wait a bit after calling connect to safely
                     // get the gatt services
-                    thread::sleep(Duration::from_millis(5000));
+                    thread::sleep(Duration::from_millis(250));
                     match device.get_gatt_services() {
                         Ok(_) => break 'device_loop,
                         Err(e) => println!("{:?}", e),
@@ -72,64 +133,24 @@ fn find_device(name: &str) -> Result<(), Box<Error>> {
     if !device.is_connected().unwrap() {
         return Err(Box::from("No connectable device found"));
     }
-    spoof(device, &bt_session)?;
-    // let services = device.get_gatt_services()?;
-    // for service in services {
-    //     let s = Service::new(bt_session, service.clone());
-    //     println!("{:?}", s);
-    //     let characteristics = s.get_gatt_characteristics()?;
-    //     for characteristic in characteristics {
-    //         let c = Characteristic::new(bt_session, characteristic.clone());
-    //         println!("{:?}", c);
-    //         println!("Value: {:?}", c.read_value(None));
-    //         let descriptors = c.get_gatt_descriptors()?;
-    //         for descriptor in descriptors {
-    //             let d = Descriptor::new(bt_session, descriptor.clone());
-    //             println!("{:?}", d);
-    //             println!("Value: {:?}", d.read_value(None));
-    //         }
-    //     }
-    // }
-    // device.disconnect()?;
-    Ok(())
-}
-
-fn spoof(device: Device, bt_session: &blurz::BluetoothSession) -> Result<(), Box<Error>> {
     let services = device.get_gatt_services()?;
-    let mut write_characteristic: Option<Characteristic> = None;
+    let mut write_characteristic = Characteristic::new(bt_session, "".to_string());
     for service in services {
         let s = Service::new(bt_session, service.clone());
-        println!("{:?}", s);
+        // println!("{:?}", s);
         let characteristics = s.get_gatt_characteristics()?;
         for characteristic in characteristics {
             let c = Characteristic::new(bt_session, characteristic.clone());
             if c.get_uuid().unwrap().as_str() == CHARACTERISTIC {
-                write_characteristic = Some(c);
+                write_characteristic = c;
                 break;
-            }
-            println!("{:?}", c);
-            println!("Value: {:?}", c.read_value(None));
-            let descriptors = c.get_gatt_descriptors()?;
-            for descriptor in descriptors {
-                let d = Descriptor::new(bt_session, descriptor.clone());
-                println!("{:?}", d);
-                println!("Value: {:?}", d.read_value(None));
             }
         }
     }
-    let chara = write_characteristic.unwrap();
-    let mut data = vec![2, b'N', 31];
-    for byte in "Hello From Rust!".bytes() {
-        data.push(byte);
-    }
-    data.push(3u8); // ETX
-    chara.write_value(data, None).unwrap();
-    Ok(())
-}
-
-fn main() {
-    match find_device("MWatch") {
-        Ok(_) => (),
-        Err(e) => println!("{:?}", e),
-    }
+    // device.disconnect()?;
+    Ok(Handle {
+        session: bt_session,
+        device: device,
+        characteristic: write_characteristic
+    })
 }
