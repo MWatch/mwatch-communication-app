@@ -149,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "mwatch-send"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blurz 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crc 1.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
