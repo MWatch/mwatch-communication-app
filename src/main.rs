@@ -31,7 +31,7 @@ use crc::crc32::checksum_ieee;
 #[structopt(name = "MWatch Protocol Spoofer")]
 struct Opt {
     /// Activate debug mode
-    #[structopt(short = "d", long = "debug")]
+    #[structopt(short = "v", long = "verbose")]
     debug: bool,
 
     /// binary to flash to the watch
@@ -41,6 +41,10 @@ struct Opt {
     /// Message to send, defaults to 'Hello MWatch'
     #[structopt(short = "m", long = "message", default_value = "Hello MWatch")]
     message: String,
+
+    /// Delay between chunk transmission
+    #[structopt(short = "d", long = "delay", default_value = "25")]
+    delay: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +82,7 @@ fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
     let mut data = vec![2, b'N', 31]; // N for notification
     data.append(&mut opt.message.clone().into_bytes());
     data.push(3u8); // ETX
-    send(handle, data)
+    send(handle, data, opt.delay)
 }
 
 /// Basic structure STX -> Type e.g A for Application -> (DELIM -> DATA)* -> ETX
@@ -106,10 +110,11 @@ fn send_binary(opt: &Opt, handle: &mut Handle) -> Result<(), Box<Error>> {
     bytes_to_hex(&buffer, &mut hexed[prepend.len()..]).unwrap();
     hexed.push(3u8); // ETX
     if opt.debug {
+        println!("Binary size {}", buffer.len());
         println!("Digest of binary: 0x{:08X}, as u32 {}", digest, digest);
         println!("HEXED[{}]: {:?}", hexed.len(), hexed);
     }
-    send(handle, hexed)
+    send(handle, hexed, opt.delay)
 }
 
 fn transform_u32_to_array_of_u8(x:u32) -> [u8;4] {
@@ -120,9 +125,10 @@ fn transform_u32_to_array_of_u8(x:u32) -> [u8;4] {
     return [b1, b2, b3, b4]
 }
 
-fn send(handle: &mut Handle, data: Vec<u8>) -> Result<(), Box<Error>> {
-    for chunk in data.chunks(10) {
+fn send(handle: &mut Handle, data: Vec<u8>, delay: u64) -> Result<(), Box<Error>> {
+    for chunk in data.chunks(16) {
         handle.characteristic.write_value(chunk.to_vec(), None)?;
+        thread::sleep(Duration::from_millis(delay));
     }
     Ok(())
 }
@@ -153,11 +159,11 @@ fn find_device<'a>(opt: &Opt, name: &'a str, bt_session: &'a Session) -> Result<
     let mut device: Device = Device::new(bt_session, "".to_string());
     'device_loop: for d in devices {
         device = Device::new(bt_session, d.clone());
+        let uuids = device.get_uuids()?;
         if opt.debug {
             println!("{} {:?}", device.get_id(), device.get_alias());
+            println!("{:?}", uuids);
         }
-        let uuids = device.get_uuids()?;
-        // println!("{:?}", uuids);
         'uuid_loop: for uuid in uuids {
             if uuid == SERVICE && name == device.get_alias().unwrap().as_str() {
                 println!("Device {:?} has the correct service!", device.get_alias().unwrap());
