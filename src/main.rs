@@ -43,8 +43,12 @@ struct Opt {
     message: String,
 
     /// Delay between chunk transmission
-    #[structopt(short = "d", long = "delay", default_value = "25")]
+    #[structopt(short = "i", long = "interval", default_value = "50")]
     delay: u64,
+
+    /// Dump's a binary in hex'd format
+    #[structopt(short = "d", long = "dump", parse(from_os_str), default_value = "")]
+    dump: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -60,21 +64,41 @@ fn main() -> Result<(), Box<Error>> {
     if opt.debug {
         println!("{:?}", opt);
     }
-    let bt_session = &Session::create_session(None)?;
-    match find_device(&opt, "MWatch", &bt_session) {
-        Ok(mut handle) => {
-            if opt.binary.to_str().unwrap() == "" {
-                spoof_msg(&opt, &mut handle).unwrap();
-            } else {
-                send_binary(&opt, &mut handle).unwrap();
-            }
-            println!("finished transmission.");
-            // always disconnect at the end
-            handle.device.disconnect()?;
-            println!("Disconnected.");
-        },
-        Err(e) => println!("{:?}", e),
+    if opt.dump.to_str().unwrap() != "" {
+        dump(&opt)?;
+    } else {
+        let bt_session = &Session::create_session(None)?;
+        match find_device(&opt, "MWatch", &bt_session) {
+            Ok(mut handle) => {
+                if opt.binary.to_str().unwrap() == "" {
+                    spoof_msg(&opt, &mut handle).unwrap();
+                } else {
+                    send_binary(&opt, &mut handle).unwrap();
+                }
+                println!("finished transmission.");
+                // always disconnect at the end
+                handle.device.disconnect()?;
+                println!("Disconnected.");
+            },
+            Err(e) => println!("{:?}", e),
+        }
     }
+
+    Ok(())
+}
+
+fn dump(opt: &Opt) -> Result<(), Box<Error>> {
+    let mut buffer = Vec::new();
+    let mut file = File::open(&opt.dump)?;
+    file.read_to_end(&mut buffer)?;
+
+    let mut hex_bytes = vec![0u8; buffer.len() * 2];
+    bytes_to_hex(&buffer, &mut hex_bytes).unwrap();
+    println!("Dump: [");
+    for i in 0..hex_bytes.len(){
+        print!("{}", hex_bytes[i]);
+    }
+    println!("]");
     Ok(())
 }
 
