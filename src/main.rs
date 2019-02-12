@@ -94,13 +94,13 @@ fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
 }
 
 fn send_syscall(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
-    let mut data = vec![2, b'N', 31]; // N for notification
+    let mut data = vec![2, b'S', 31]; // S for syscall
     let mut syscall = opt.syscall.clone().into_bytes();
-    if opt.debug {
-        println!("Sending syscall: {:?}", syscall);
-    }
     data.append(&mut syscall);
     data.push(3u8); // ETX
+    if opt.debug {
+        println!("Sending syscall: {:?}", data);
+    }
     send(handle, data, opt.delay)
 }
 
