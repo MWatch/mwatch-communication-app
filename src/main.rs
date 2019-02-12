@@ -38,8 +38,12 @@ struct Opt {
     #[structopt(short = "b", long = "binary", parse(from_os_str), default_value = "")]
     binary: PathBuf,
 
-    /// Message to send, defaults to 'Hello MWatch'
-    #[structopt(short = "m", long = "message", default_value = "Hello MWatch")]
+    /// Invoke a syscall on the mwatch
+    #[structopt(short = "s", long = "syscall", default_value = "")]
+    syscall: String,
+
+    /// Message to send
+    #[structopt(short = "m", long = "message", default_value = "")]
     message: String,
 
     /// Delay between chunk transmission
@@ -63,10 +67,14 @@ fn main() -> Result<(), Box<Error>> {
     let bt_session = &Session::create_session(None)?;
     match find_device(&opt, "MWatch", &bt_session) {
         Ok(mut handle) => {
-            if opt.binary.to_str().unwrap() == "" {
+            if !opt.message.is_empty() {
                 spoof_msg(&opt, &mut handle).unwrap();
-            } else {
+            } else if !opt.binary.clone().into_os_string().is_empty() {
                 send_binary(&opt, &mut handle).unwrap();
+            } else if !opt.syscall.is_empty() {
+                send_syscall(&opt, &mut handle).unwrap();
+            } else {
+                panic!("Invalid args")
             }
             println!("finished transmission.");
             // always disconnect at the end
@@ -82,6 +90,17 @@ fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
     let mut data = vec![2, b'N', 31]; // N for notification
     data.append(&mut opt.message.clone().into_bytes());
     data.push(3u8); // ETX
+    send(handle, data, opt.delay)
+}
+
+fn send_syscall(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
+    let mut data = vec![2, b'S', 31]; // S for syscall
+    let mut syscall = opt.syscall.clone().into_bytes();
+    data.append(&mut syscall);
+    data.push(3u8); // ETX
+    if opt.debug {
+        println!("Sending syscall: {:?}", data);
+    }
     send(handle, data, opt.delay)
 }
 
