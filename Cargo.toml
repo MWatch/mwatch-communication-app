@@ -1,6 +1,6 @@
 [package]
 name = "mwatch-send"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Scott Mabin <MabezDev@gmail.com>"]
 edition = "2018"
 description = "A tool to upload binaries and send notifications to the mwatch over bluetooth"
