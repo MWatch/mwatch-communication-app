@@ -26,6 +26,9 @@ use simple_hex::bytes_to_hex;
 
 use crc::crc32::checksum_ieee;
 
+pub const DELIM: u8 = 31;
+pub const ETX: u8 = 3;
+
 /// MWatch Protocol Spoofer
 #[derive(StructOpt, Debug)]
 #[structopt(name = "MWatch Protocol Spoofer")]
@@ -43,8 +46,20 @@ struct Opt {
     syscall: String,
 
     /// Message to send
-    #[structopt(short = "m", long = "message", default_value = "")]
-    message: String,
+    #[structopt(short = "m", long = "message")]
+    message: bool,
+
+    /// Message title
+    #[structopt(short = "t", long = "title", default_value = "Title")]
+    m_title: String,
+
+    /// Message content
+    #[structopt(short = "c", long = "content", default_value = "Demo message")]
+    m_content: String,
+
+    /// Where did the message come from, facebook, slack, discord..
+    #[structopt(short = "a", long = "app_src", default_value = "generic")]
+    m_app_src: String,
 
     /// Delay between chunk transmission
     #[structopt(short = "d", long = "delay", default_value = "25")]
@@ -67,7 +82,7 @@ fn main() -> Result<(), Box<Error>> {
     let bt_session = &Session::create_session(None)?;
     match find_device(&opt, "MWatch", &bt_session) {
         Ok(mut handle) => {
-            if !opt.message.is_empty() {
+            if opt.message {
                 spoof_msg(&opt, &mut handle).unwrap();
             } else if !opt.binary.clone().into_os_string().is_empty() {
                 send_binary(&opt, &mut handle).unwrap();
@@ -87,17 +102,24 @@ fn main() -> Result<(), Box<Error>> {
 }
 
 fn spoof_msg(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
-    let mut data = vec![2, b'N', 31]; // N for notification
-    data.append(&mut opt.message.clone().into_bytes());
-    data.push(3u8); // ETX
+    let mut data = vec![2, b'N', DELIM]; // N for notification
+    let mut src = opt.m_app_src.clone().into_bytes();
+    let mut title = opt.m_title.clone().into_bytes();
+    let mut body = opt.m_content.clone().into_bytes();
+    data.append(&mut src);
+    data.push(DELIM);
+    data.append(&mut title);
+    data.push(DELIM);
+    data.append(&mut body);
+    data.push(ETX); // ETX
     send(handle, data, opt.delay)
 }
 
 fn send_syscall(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
-    let mut data = vec![2, b'S', 31]; // S for syscall
+    let mut data = vec![2, b'S', DELIM]; // S for syscall
     let mut syscall = opt.syscall.clone().into_bytes();
     data.append(&mut syscall);
-    data.push(3u8); // ETX
+    data.push(ETX); // ETX
     if opt.debug {
         println!("Sending syscall: {:?}", data);
     }
@@ -107,7 +129,7 @@ fn send_syscall(opt: &Opt, handle : &mut Handle) -> Result<(), Box<Error>> {
 /// Basic structure STX -> Type e.g A for Application -> (DELIM -> DATA)* -> ETX
 /// * inidicates an number of delimiters followed by data
 fn send_binary(opt: &Opt, handle: &mut Handle) -> Result<(), Box<Error>> {
-    let mut prepend = vec![2, b'A', 31]; // A for application
+    let mut prepend = vec![2, b'A', DELIM]; // A for application
     let mut buffer = Vec::new();
     let mut file = File::open(&opt.binary)?;
     file.read_to_end(&mut buffer)?;
@@ -117,7 +139,7 @@ fn send_binary(opt: &Opt, handle: &mut Handle) -> Result<(), Box<Error>> {
     let mut digest_hex_bytes = vec![0u8; bytes.len() * 2];
     bytes_to_hex(&bytes, &mut digest_hex_bytes).unwrap();
     prepend.append(&mut digest_hex_bytes);
-    prepend.push(31); //DELIM
+    prepend.push(DELIM);
 
     let total = (buffer.len() * 2) + prepend.len();
     let mut hexed = vec![0u8; total];
@@ -127,7 +149,7 @@ fn send_binary(opt: &Opt, handle: &mut Handle) -> Result<(), Box<Error>> {
     }
     
     bytes_to_hex(&buffer, &mut hexed[prepend.len()..]).unwrap();
-    hexed.push(3u8); // ETX
+    hexed.push(ETX); // ETX
     if opt.debug {
         println!("Binary size {}", buffer.len());
         println!("Digest of binary: 0x{:08X}, as u32 {}", digest, digest);
